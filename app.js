@@ -55,14 +55,26 @@ const DEFAULT_SETTINGS = {
   showSeconds: false,
   showGreeting: true,
   background: 'gradient-mesh',
-  customBgUrl: ''
+  customBgUrl: '',
+  themeMode: 'auto',
+  clockOpacity: 45,
+  lightBgType: 'light-mesh',
+  lightCustomBgUrl: '',
+  darkBgType: 'gradient-mesh',
+  darkCustomBgUrl: '',
+  lightClockOpacity: 100,
+  darkClockOpacity: 100,
+  backdropOpacity: 45,
+  lightBackdropOpacity: 85,
+  darkBackdropOpacity: 45
 };
 
 // State Variables
 let state = {
   shortcuts: [],
   ais: [],
-  settings: {}
+  settings: {},
+  wallpaperHistory: []
 };
 
 // UI Cache
@@ -94,6 +106,11 @@ const elements = {
 
   // Setting Fields
   selectEngine: document.getElementById('setting-default-engine'),
+  themeModeSelect: document.getElementById('setting-theme-mode'),
+  clockOpacitySlider: document.getElementById('setting-clock-opacity'),
+  clockOpacityValue: document.getElementById('clock-opacity-value'),
+  backdropOpacitySlider: document.getElementById('setting-backdrop-opacity'),
+  backdropOpacityValue: document.getElementById('backdrop-opacity-value'),
   chk12h: document.getElementById('setting-clock-12h'),
   chkSeconds: document.getElementById('setting-show-seconds'),
   chkGreeting: document.getElementById('setting-show-greeting'),
@@ -101,8 +118,11 @@ const elements = {
   customBgWrapper: document.getElementById('custom-bg-input-wrapper'),
   customBgUrlInput: document.getElementById('setting-custom-bg-url'),
   applyCustomBgBtn: document.getElementById('apply-custom-bg-btn'),
+  wallpaperHistoryWrapper: document.getElementById('wallpaper-history-wrapper'),
+  wallpaperHistoryList: document.getElementById('wallpaper-history-list'),
 
   // AI Config fields in settings drawer
+  settingsShortcutsList: document.getElementById('settings-shortcuts-list'),
   settingsAiList: document.getElementById('settings-ai-list'),
   newAiNameInput: document.getElementById('new-ai-name'),
   newAiUrlInput: document.getElementById('new-ai-url'),
@@ -137,6 +157,7 @@ function init() {
   setupSearch();
   renderShortcuts();
   renderAIs();
+  renderSettingsShortcuts();
   renderSettingsAIs();
   setupEventListeners();
 }
@@ -146,13 +167,70 @@ function loadData() {
   const localShortcuts = localStorage.getItem('homepage_shortcuts');
   const localAIs = localStorage.getItem('homepage_ais');
   const localSettings = localStorage.getItem('homepage_settings');
+  const localHistory = localStorage.getItem('homepage_wallpaper_history');
 
   state.shortcuts = localShortcuts ? JSON.parse(localShortcuts) : [...DEFAULT_SHORTCUTS];
   state.ais = localAIs ? JSON.parse(localAIs) : [...DEFAULT_AIS];
   state.settings = localSettings ? JSON.parse(localSettings) : { ...DEFAULT_SETTINGS };
+  state.wallpaperHistory = localHistory ? JSON.parse(localHistory) : [];
 
   // Set default settings if keys are missing from previous saves
   state.settings = { ...DEFAULT_SETTINGS, ...state.settings };
+
+  // Since we changed the behavior, let's swap previous defaults for users transitioning:
+  if (state.settings.lightClockOpacity === 85 && state.settings.lightBackdropOpacity === 0) {
+    state.settings.lightClockOpacity = 100;
+    state.settings.lightBackdropOpacity = 85;
+  }
+  if (state.settings.darkClockOpacity === 45 && state.settings.darkBackdropOpacity === 0) {
+    state.settings.darkClockOpacity = 100;
+    state.settings.darkBackdropOpacity = 45;
+  }
+
+  // Migrations for light/dark clock opacity
+  if (state.settings.lightClockOpacity === undefined) {
+    state.settings.lightClockOpacity = 100;
+  }
+  if (state.settings.darkClockOpacity === undefined) {
+    state.settings.darkClockOpacity = 100;
+  }
+
+  // Migrations for light/dark backdrop opacity
+  if (state.settings.lightBackdropOpacity === undefined) {
+    state.settings.lightBackdropOpacity = 85;
+  }
+  if (state.settings.darkBackdropOpacity === undefined) {
+    state.settings.darkBackdropOpacity = 45;
+  }
+
+  // Migrations for light/dark setup variables
+  if (!state.settings.lightBgType) {
+    const lightPresets = ['light-mesh', 'light-peach', 'light-mint'];
+    if (lightPresets.includes(state.settings.background)) {
+      state.settings.lightBgType = state.settings.background;
+      state.settings.lightCustomBgUrl = '';
+    } else if (state.settings.background === 'custom' && state.settings.themeMode === 'light') {
+      state.settings.lightBgType = 'custom';
+      state.settings.lightCustomBgUrl = state.settings.customBgUrl;
+    } else {
+      state.settings.lightBgType = 'light-mesh';
+      state.settings.lightCustomBgUrl = '';
+    }
+  }
+
+  if (!state.settings.darkBgType) {
+    const darkPresets = ['gradient-mesh', 'gradient-aurora', 'gradient-sunset', 'gradient-nebula', 'solid-dark'];
+    if (darkPresets.includes(state.settings.background)) {
+      state.settings.darkBgType = state.settings.background;
+      state.settings.darkCustomBgUrl = '';
+    } else if (state.settings.background === 'custom' && state.settings.themeMode === 'dark') {
+      state.settings.darkBgType = 'custom';
+      state.settings.darkCustomBgUrl = state.settings.customBgUrl;
+    } else {
+      state.settings.darkBgType = 'gradient-mesh';
+      state.settings.darkCustomBgUrl = '';
+    }
+  }
 }
 
 // Save configuration to localStorage
@@ -160,10 +238,27 @@ function saveData() {
   localStorage.setItem('homepage_shortcuts', JSON.stringify(state.shortcuts));
   localStorage.setItem('homepage_ais', JSON.stringify(state.ais));
   localStorage.setItem('homepage_settings', JSON.stringify(state.settings));
+  localStorage.setItem('homepage_wallpaper_history', JSON.stringify(state.wallpaperHistory));
 }
 
 // Apply visual configurations from state
 function applySettings() {
+  // Determine if active theme is Light or Dark
+  let isLight = false;
+  if (state.settings.themeMode === 'light') {
+    isLight = true;
+  } else if (state.settings.themeMode === 'auto') {
+    isLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+  }
+
+  // Get background config corresponding to active mode
+  const activeBg = isLight ? (state.settings.lightBgType || 'light-mesh') : (state.settings.darkBgType || 'gradient-mesh');
+  const activeUrl = isLight ? (state.settings.lightCustomBgUrl || '') : (state.settings.darkCustomBgUrl || '');
+
+  // Synchronize state.settings for compatibility
+  state.settings.background = activeBg;
+  state.settings.customBgUrl = activeUrl;
+
   // 1. Background Settings
   applyBackground(state.settings.background, state.settings.customBgUrl);
 
@@ -178,7 +273,7 @@ function applySettings() {
 
   if (state.settings.background === 'custom') {
     elements.customBgWrapper.classList.remove('hidden');
-    elements.customBgUrlInput.value = state.settings.customBgUrl;
+    elements.customBgUrlInput.value = state.settings.customBgUrl || '';
   } else {
     elements.customBgWrapper.classList.add('hidden');
   }
@@ -198,7 +293,60 @@ function applySettings() {
     elements.greeting.classList.add('hidden');
   }
 
+  // 4. Apply Interface Theme
+  if (isLight) {
+    document.body.classList.add('light-theme');
+  } else {
+    document.body.classList.remove('light-theme');
+  }
+
+  if (elements.themeModeSelect) {
+    elements.themeModeSelect.value = state.settings.themeMode || 'auto';
+  }
+
+  // 5. Apply Clock Glass and Backdrop Opacity
+  const opacity = isLight 
+    ? (state.settings.lightClockOpacity !== undefined ? state.settings.lightClockOpacity : 85)
+    : (state.settings.darkClockOpacity !== undefined ? state.settings.darkClockOpacity : 45);
+
+  state.settings.clockOpacity = opacity; // Keep synchronized for compatibility
+  document.documentElement.style.setProperty('--clock-opacity', opacity / 100);
+  if (elements.clockOpacitySlider) {
+    elements.clockOpacitySlider.value = opacity;
+  }
+  if (elements.clockOpacityValue) {
+    elements.clockOpacityValue.textContent = opacity + '%';
+  }
+
+  const bgOpacity = isLight 
+    ? (state.settings.lightBackdropOpacity !== undefined ? state.settings.lightBackdropOpacity : 0)
+    : (state.settings.darkBackdropOpacity !== undefined ? state.settings.darkBackdropOpacity : 0);
+
+  state.settings.backdropOpacity = bgOpacity; // Keep synchronized for compatibility
+  document.documentElement.style.setProperty('--backdrop-opacity', bgOpacity / 100);
+  updateClockBackdrop(bgOpacity);
+  if (elements.backdropOpacitySlider) {
+    elements.backdropOpacitySlider.value = bgOpacity;
+  }
+  if (elements.backdropOpacityValue) {
+    elements.backdropOpacityValue.textContent = bgOpacity + '%';
+  }
+
   updateClockDisplay();
+  renderWallpaperHistory();
+}
+
+// Toggle backdrop-filter on/off to ensure 0% is truly invisible
+function updateClockBackdrop(val) {
+  const widget = document.querySelector('.clock-widget');
+  if (!widget) return;
+  if (val === 0) {
+    widget.style.backdropFilter = 'none';
+    widget.style.webkitBackdropFilter = 'none';
+  } else {
+    widget.style.backdropFilter = '';
+    widget.style.webkitBackdropFilter = '';
+  }
 }
 
 // Background handler
@@ -208,7 +356,8 @@ function applyBackground(type, customUrl) {
   elements.bgOverlay.style.backgroundImage = '';
 
   if (type === 'custom' && customUrl) {
-    elements.bgOverlay.style.backgroundImage = `url('${customUrl}')`;
+    const resolved = resolveWallpaperUrl(customUrl);
+    elements.bgOverlay.style.backgroundImage = `url('${resolved}')`;
   } else {
     // Is preset gradient/solid
     elements.bgOverlay.classList.add(type);
@@ -310,7 +459,7 @@ function renderAIs() {
     const btn = document.createElement('a');
     btn.href = ai.url;
     btn.className = 'ai-launch-btn';
-    btn.target = '_blank';
+    btn.target = '_self';
     btn.rel = 'noopener';
     btn.style.setProperty('--ai-color', ai.color);
     btn.style.setProperty('--ai-glow-color', hexToRgba(ai.color, 0.35));
@@ -324,24 +473,42 @@ function renderSettingsAIs() {
   if (!elements.settingsAiList) return;
   elements.settingsAiList.innerHTML = '';
 
-  state.ais.forEach(ai => {
+  state.ais.forEach((ai, index) => {
     const li = document.createElement('li');
-    li.className = 'settings-ai-item';
-    li.style.borderLeftColor = ai.color;
+    li.className = 'settings-list-item';
+    li.style.borderLeft = `3px solid ${ai.color}`;
     li.innerHTML = `
-      <div class="ai-item-info">
-        <span class="ai-item-name" style="color: ${ai.color}">${ai.name}</span>
-        <span class="ai-item-url">${ai.url}</span>
+      <div class="list-item-info">
+        <span class="list-item-name" style="color: ${ai.color}">${ai.name}</span>
+        <span class="list-item-url">${ai.url}</span>
       </div>
-      <button type="button" class="ai-item-del-btn" aria-label="Delete ${ai.name}">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="3 6 5 6 21 6"></polyline>
-          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-        </svg>
-      </button>
+      <div class="list-item-actions">
+        <button type="button" class="list-action-btn move-up-btn" aria-label="Move Up">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="18 15 12 9 6 15"></polyline>
+          </svg>
+        </button>
+        <button type="button" class="list-action-btn move-down-btn" aria-label="Move Down">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </button>
+        <button type="button" class="list-action-btn del-btn" aria-label="Delete">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+        </button>
+      </div>
     `;
 
-    li.querySelector('.ai-item-del-btn').addEventListener('click', () => {
+    li.querySelector('.move-up-btn').addEventListener('click', () => {
+      moveAI(index, -1);
+    });
+    li.querySelector('.move-down-btn').addEventListener('click', () => {
+      moveAI(index, 1);
+    });
+    li.querySelector('.del-btn').addEventListener('click', () => {
       deleteAI(ai.id);
     });
 
@@ -351,6 +518,17 @@ function renderSettingsAIs() {
 
 function deleteAI(id) {
   state.ais = state.ais.filter(ai => ai.id !== id);
+  saveData();
+  renderAIs();
+  renderSettingsAIs();
+}
+
+function moveAI(index, direction) {
+  const newIndex = index + direction;
+  if (newIndex < 0 || newIndex >= state.ais.length) return;
+  const temp = state.ais[index];
+  state.ais[index] = state.ais[newIndex];
+  state.ais[newIndex] = temp;
   saveData();
   renderAIs();
   renderSettingsAIs();
@@ -401,10 +579,10 @@ function renderShortcuts() {
 
     card.innerHTML = `
       <button class="shortcut-action-menu-btn" aria-label="Edit shortcut">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="1"></circle>
-          <circle cx="12" cy="5" r="1"></circle>
-          <circle cx="12" cy="19" r="1"></circle>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <circle cx="12" cy="12" r="2"></circle>
+          <circle cx="12" cy="5" r="2"></circle>
+          <circle cx="12" cy="19" r="2"></circle>
         </svg>
       </button>
       <div class="shortcut-icon-container${shortcut.icon ? ' has-custom-icon' : ''}">
@@ -529,10 +707,24 @@ function handleShortcutSubmit(e) {
   let url = elements.shortcutUrlInput.value.trim();
   const icon = elements.shortcutIconInput.value.trim();
 
-  // Simple auto-prefix protocol if user skips it
-  if (!/^https?:\/\//i.test(url)) {
-    url = 'https://' + url;
+  // Auto-prefix/suffix autocomplete logic
+  let protocol = 'https://';
+  let rest = url;
+  if (/^https?:\/\//i.test(url)) {
+    const match = url.match(/^(https?:\/\/)(.*)/i);
+    protocol = match[1];
+    rest = match[2];
   }
+
+  let domainAndPath = rest;
+  let domainPart = domainAndPath.split('/')[0];
+  if (!domainPart.includes('.')) {
+    let parts = domainAndPath.split('/');
+    parts[0] = parts[0] + '.com';
+    domainAndPath = parts.join('/');
+  }
+
+  url = protocol + domainAndPath;
 
   if (activeEditShortcutId) {
     // Edit existing
@@ -555,6 +747,7 @@ function handleShortcutSubmit(e) {
 
   saveData();
   renderShortcuts();
+  renderSettingsShortcuts();
   elements.shortcutDialog.close();
 }
 
@@ -562,6 +755,161 @@ function deleteShortcut(id) {
   state.shortcuts = state.shortcuts.filter(s => s.id !== id);
   saveData();
   renderShortcuts();
+  renderSettingsShortcuts();
+}
+
+function renderSettingsShortcuts() {
+  if (!elements.settingsShortcutsList) return;
+  elements.settingsShortcutsList.innerHTML = '';
+
+  state.shortcuts.forEach((shortcut, index) => {
+    const li = document.createElement('li');
+    li.className = 'settings-list-item';
+    li.innerHTML = `
+      <div class="list-item-info">
+        <span class="list-item-name">${shortcut.name}</span>
+        <span class="list-item-url">${shortcut.url}</span>
+      </div>
+      <div class="list-item-actions">
+        <button type="button" class="list-action-btn move-up-btn" aria-label="Move Up">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="18 15 12 9 6 15"></polyline>
+          </svg>
+        </button>
+        <button type="button" class="list-action-btn move-down-btn" aria-label="Move Down">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </button>
+        <button type="button" class="list-action-btn del-btn" aria-label="Delete">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+        </button>
+      </div>
+    `;
+
+    li.querySelector('.move-up-btn').addEventListener('click', () => {
+      moveShortcut(index, -1);
+    });
+    li.querySelector('.move-down-btn').addEventListener('click', () => {
+      moveShortcut(index, 1);
+    });
+    li.querySelector('.del-btn').addEventListener('click', () => {
+      deleteShortcut(shortcut.id);
+    });
+
+    elements.settingsShortcutsList.appendChild(li);
+  });
+}
+
+function moveShortcut(index, direction) {
+  const newIndex = index + direction;
+  if (newIndex < 0 || newIndex >= state.shortcuts.length) return;
+  const temp = state.shortcuts[index];
+  state.shortcuts[index] = state.shortcuts[newIndex];
+  state.shortcuts[newIndex] = temp;
+  saveData();
+  renderShortcuts();
+  renderSettingsShortcuts();
+}
+
+function resolveWallpaperUrl(url) {
+  if (!url) return '';
+  // Convert Google Drive view link to direct link
+  const drivePattern1 = /drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/;
+  const drivePattern2 = /drive\.google\.com\/open\?id=([a-zA-Z0-9_-]+)/;
+  
+  let match = url.match(drivePattern1) || url.match(drivePattern2);
+  if (match && match[1]) {
+    const fileId = match[1];
+    return `https://docs.google.com/uc?export=view&id=${fileId}`;
+  }
+  return url;
+}
+
+function addWallpaperToHistory(url) {
+  if (!url) return;
+  const resolved = resolveWallpaperUrl(url);
+  // Remove duplicates
+  state.wallpaperHistory = state.wallpaperHistory.filter(item => item !== resolved);
+  // Add to start
+  state.wallpaperHistory.unshift(resolved);
+  // Limit to 3 items
+  if (state.wallpaperHistory.length > 3) {
+    state.wallpaperHistory.pop();
+  }
+  localStorage.setItem('homepage_wallpaper_history', JSON.stringify(state.wallpaperHistory));
+  renderWallpaperHistory();
+}
+
+function renderWallpaperHistory() {
+  if (!elements.wallpaperHistoryList) return;
+  elements.wallpaperHistoryList.innerHTML = '';
+  
+  if (state.wallpaperHistory.length === 0) {
+    elements.wallpaperHistoryWrapper.classList.add('hidden');
+    return;
+  }
+  
+  elements.wallpaperHistoryWrapper.classList.remove('hidden');
+  
+  state.wallpaperHistory.forEach(url => {
+    const item = document.createElement('div');
+    item.className = 'wallpaper-history-item';
+    if (state.settings.background === 'custom' && state.settings.customBgUrl === url) {
+      item.classList.add('active');
+    }
+    item.style.backgroundImage = `url('${url}')`;
+    item.title = 'Apply this wallpaper';
+    item.addEventListener('click', () => {
+      let isLight = false;
+      if (state.settings.themeMode === 'light') {
+        isLight = true;
+      } else if (state.settings.themeMode === 'auto') {
+        isLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+      }
+
+      if (isLight) {
+        state.settings.lightBgType = 'custom';
+        state.settings.lightCustomBgUrl = url;
+      } else {
+        state.settings.darkBgType = 'custom';
+        state.settings.darkCustomBgUrl = url;
+      }
+
+      saveData();
+      applySettings();
+      renderWallpaperHistory();
+    });
+    elements.wallpaperHistoryList.appendChild(item);
+  });
+}
+
+// Resolve and save custom wallpaper configuration for active mode
+function saveCustomWallpaper(url) {
+  if (!url) return;
+  const resolved = resolveWallpaperUrl(url);
+
+  let isLight = false;
+  if (state.settings.themeMode === 'light') {
+    isLight = true;
+  } else if (state.settings.themeMode === 'auto') {
+    isLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+  }
+
+  if (isLight) {
+    state.settings.lightBgType = 'custom';
+    state.settings.lightCustomBgUrl = resolved;
+  } else {
+    state.settings.darkBgType = 'custom';
+    state.settings.darkCustomBgUrl = resolved;
+  }
+
+  addWallpaperToHistory(resolved);
+  saveData();
+  applySettings();
 }
 
 // Event Listeners
@@ -575,16 +923,6 @@ function setupEventListeners() {
   elements.settingsCloseBtn.addEventListener('click', () => {
     elements.settingsDrawer.classList.remove('open');
     elements.settingsDrawer.setAttribute('aria-hidden', 'true');
-  });
-
-  // Close drawer on click outside
-  document.addEventListener('click', (e) => {
-    if (elements.settingsDrawer.classList.contains('open') &&
-      !elements.settingsDrawer.contains(e.target) &&
-      !elements.settingsToggleBtn.contains(e.target)) {
-      elements.settingsDrawer.classList.remove('open');
-      elements.settingsDrawer.setAttribute('aria-hidden', 'true');
-    }
   });
 
   // Google Apps Popover toggling
@@ -602,6 +940,83 @@ function setupEventListeners() {
         !appsToggleBtn.contains(e.target)) {
         appsPopover.classList.remove('open');
       }
+    });
+  }
+
+  // Theme Mode Select
+  if (elements.themeModeSelect) {
+    elements.themeModeSelect.addEventListener('change', (e) => {
+      state.settings.themeMode = e.target.value;
+      saveData();
+      applySettings();
+    });
+  }
+
+  // Listen for system theme changes
+  if (window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+      if (state.settings.themeMode === 'auto') {
+        applySettings();
+      }
+    });
+  }
+
+  // Clock Opacity slider input/change
+  if (elements.clockOpacitySlider) {
+    elements.clockOpacitySlider.addEventListener('input', (e) => {
+      const val = parseInt(e.target.value, 10);
+      
+      let isLight = false;
+      if (state.settings.themeMode === 'light') {
+        isLight = true;
+      } else if (state.settings.themeMode === 'auto') {
+        isLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+      }
+      
+      if (isLight) {
+        state.settings.lightClockOpacity = val;
+      } else {
+        state.settings.darkClockOpacity = val;
+      }
+      state.settings.clockOpacity = val; // Keep synchronized for compatibility
+      
+      document.documentElement.style.setProperty('--clock-opacity', val / 100);
+      if (elements.clockOpacityValue) {
+        elements.clockOpacityValue.textContent = val + '%';
+      }
+    });
+    elements.clockOpacitySlider.addEventListener('change', () => {
+      saveData();
+    });
+  }
+
+  // Backdrop Opacity slider input/change
+  if (elements.backdropOpacitySlider) {
+    elements.backdropOpacitySlider.addEventListener('input', (e) => {
+      const val = parseInt(e.target.value, 10);
+      
+      let isLight = false;
+      if (state.settings.themeMode === 'light') {
+        isLight = true;
+      } else if (state.settings.themeMode === 'auto') {
+        isLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+      }
+      
+      if (isLight) {
+        state.settings.lightBackdropOpacity = val;
+      } else {
+        state.settings.darkBackdropOpacity = val;
+      }
+      state.settings.backdropOpacity = val; // Keep synchronized for compatibility
+      
+      document.documentElement.style.setProperty('--backdrop-opacity', val / 100);
+      updateClockBackdrop(val);
+      if (elements.backdropOpacityValue) {
+        elements.backdropOpacityValue.textContent = val + '%';
+      }
+    });
+    elements.backdropOpacitySlider.addEventListener('change', () => {
+      saveData();
     });
   }
 
@@ -640,40 +1055,50 @@ function setupEventListeners() {
   elements.bgPresetButtons.forEach(btn => {
     btn.addEventListener('click', () => {
       const bgType = btn.dataset.bg;
-      state.settings.background = bgType;
 
-      elements.bgPresetButtons.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
+      const lightPresets = ['light-mesh', 'light-peach', 'light-mint'];
+      const darkPresets = ['gradient-mesh', 'gradient-aurora', 'gradient-sunset', 'gradient-nebula', 'solid-dark'];
+
+      if (lightPresets.includes(bgType)) {
+        state.settings.lightBgType = bgType;
+        state.settings.themeMode = 'light';
+      } else if (darkPresets.includes(bgType)) {
+        state.settings.darkBgType = bgType;
+        state.settings.themeMode = 'dark';
+      } else if (bgType === 'custom') {
+        // Apply custom wallpaper for active theme mode
+        let isLight = false;
+        if (state.settings.themeMode === 'light') {
+          isLight = true;
+        } else if (state.settings.themeMode === 'auto') {
+          isLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+        }
+
+        if (isLight) {
+          state.settings.lightBgType = 'custom';
+        } else {
+          state.settings.darkBgType = 'custom';
+        }
+      }
+
+      saveData();
+      applySettings();
 
       if (bgType === 'custom') {
-        elements.customBgWrapper.classList.remove('hidden');
         elements.customBgUrlInput.focus();
-      } else {
-        elements.customBgWrapper.classList.add('hidden');
-        state.settings.customBgUrl = '';
-        applyBackground(bgType, '');
-        saveData();
       }
     });
   });
 
   elements.applyCustomBgBtn.addEventListener('click', () => {
     const url = elements.customBgUrlInput.value.trim();
-    if (url) {
-      state.settings.customBgUrl = url;
-      applyBackground('custom', url);
-      saveData();
-    }
+    saveCustomWallpaper(url);
   });
 
   elements.customBgUrlInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
       const url = elements.customBgUrlInput.value.trim();
-      if (url) {
-        state.settings.customBgUrl = url;
-        applyBackground('custom', url);
-        saveData();
-      }
+      saveCustomWallpaper(url);
     }
   });
 
